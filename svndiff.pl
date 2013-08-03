@@ -7,25 +7,7 @@ use Cwd;
 use Encode;
 use Encode::JP;
 
-#use File::Path;
-#use File::Copy 'copy';
-# mkpath は日本語文字列はうまく動作しない（バグがある。/test表示 の場合、testフォルダとtest表示フォルダの２個作成される)
-# windows command が文字化けしてしまうので使わない。
-# use open IN   => ":encoding(cp932)"; # 入力ファイルはcp932
-# use open OUT  => ":encoding(cp932)"; # 出力ファイルはcp932
-# binmode STDIN, ':encoding(cp932)'; # 標準入力はcp932
-# binmode STDOUT, ':encoding(cp932)'; # 標準出力はcp932
-# binmode STDERR, ':encoding(cp932)'; #エラー出力はcp932
-# binmode STDOUT => ":utf8";
-
-#_mkdir('/output/test/test2\test3\test4');
-#exit;
-
-my $mypath = __FILE__;            # ファイル名がパスつきで入ってきます。
-$mypath =~ s/^(.+)[\\\/].+$/$1/;  # 最後の\か/までマッチしたもので置き換え
-$mypath =~ s/\\/\//g;
-
-print "svndiff ver. 0.13.07.29.\n";
+print "svndiff ver. 0.13.08.02.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
 my $args = @{$argv};
 
@@ -219,9 +201,8 @@ sub getRevisionNumber
 			
 		}
 	}
-	return ($revs[$#revs], $revs[0], \%fileList);
+	return ($revs[0], $revs[$#revs], \%fileList);
 }
-
 
 sub getOptions
 {
@@ -229,12 +210,8 @@ sub getOptions
 	my %options = ();
 	my @newAragv = ();
 	for(my $i=0; $i< @{$argv}; $i++){
-		my $key = decode('cp932', $argv->[$i]); # 入力アーギュメントは文字コードを変更してやらないとダメっぽい。
-		if( $key eq '-u' ){
-			$options{$key} = decode('cp932', $argv->[$i+1]);
-			$i++;
-		}
-		elsif( $key eq '-p' ){
+		my $key = decode('cp932', $argv->[$i]);
+		if( $key =~ /^-(u|p|report)$/ ){
 			$options{$key} = decode('cp932', $argv->[$i+1]);
 			$i++;
 		}
@@ -247,11 +224,6 @@ sub getOptions
 			$options{'-r_end'} = $2;
 			$i++;
 		}
-		elsif( $key eq '-report' ){
-			$options{'-report'} = decode('cp932', $argv->[$i+1]);
-			$i++;
-		}
-		
 		else{
 			push @newAragv, $key;
 		}
