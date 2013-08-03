@@ -44,7 +44,16 @@ my $diffres = svnCmd("diff","-r $srev:$erev", $address, "");
 my $files = getDiffFileList($diffres);
 
 exportFiles($srev, $address, $files, $outputPath);
-exportFiles($erev, $address, $files, $outputPath);
+my $deleteFile = exportFiles($erev, $address, $files, $outputPath);
+# end 時点でファイルが削除されているものはexprotできない(svnコマンド仕様)
+if( 0 != @{$deleteFile} ){
+	print encode('cp932', "please export manually.(svn command not supported)\n");
+	foreach my $file (@{$deleteFile}){
+		print encode('cp932', "delete file \[$file\]\n");
+	}
+}
+
+
 if( exists $gOptions->{'-report'} ){
 	exportReport( "$outputPath\/$gOptions->{'-report'}", $fileList);
 }
@@ -87,6 +96,7 @@ sub exportFiles
 	my ($rev, $address, $files, $path) = @_;
 
 	$path = $path."\/$rev";
+	my @notFoundFile = ();
 	foreach my $file (@{$files}){
 		my $dir = "$path\/$file";
 		$dir =~ s/^(.+)[\\\/].+$/$1/;
@@ -94,8 +104,13 @@ sub exportFiles
 		_mkdir $dir;
 		
 		my $res = svnCmd("export", "-r $rev", "$address\/$file", "$path\/$file");
+		my $resString = join '', @{$res};
+		if( $resString =~ /svn: E(\d+?):/ ){
+			push @notFoundFile, "$address\/$file";
+		}
 		#print @{$res};
 	}
+	return \@notFoundFile;
 }
 
 sub execCmd
