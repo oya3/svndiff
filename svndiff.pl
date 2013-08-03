@@ -45,7 +45,8 @@ my $files = getDiffFileList($diffres);
 
 exportFiles($srev, $address, $files, $outputPath);
 my $deleteFile = exportFiles($erev, $address, $files, $outputPath);
-# end 時点でファイルが削除されているものはexprotできない(svnコマンド仕様)
+
+# end 時点でファイルが削除されているものは、過去に遡ってexprotできない(svnコマンド仕様)
 if( 0 != @{$deleteFile} ){
 	print encode('cp932', "please export manually.(svn command not supported)\n");
 	foreach my $file (@{$deleteFile}){
