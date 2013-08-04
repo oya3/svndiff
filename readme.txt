@@ -13,4 +13,3 @@ windows 7(32,64)ŠÂ‹«‚Ì‚İ
 
 “¯«“à—eF
 svndiff.pl
-svndiff.exe

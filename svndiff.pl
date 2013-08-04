@@ -7,7 +7,9 @@ use Cwd;
 use Encode;
 use Encode::JP;
 
-print "svndiff ver. 0.13.08.02.\n";
+use Data::Dumper;
+
+print "svndiff ver. 0.13.08.04.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
 my $args = @{$argv};
 
@@ -31,15 +33,16 @@ my $address = $argv->[0];
 my $outputPath  = $argv->[1];
 
 # オプション指定でリビジョンが存在か確認
-if( exists $gOptions->{'-r_start'} ){
+if( exists $gOptions->{'r_start'} ){
 	# オプション指定がある
-	$srev = $gOptions->{'-r_start'};
-	$erev = $gOptions->{'-r_end'};
+	$srev = $gOptions->{'r_start'};
+	$erev = $gOptions->{'r_end'};
 }
 else{
 	# ブランチの最初と最後のリビジョンを取得する
 	($srev, $erev, $fileList) = getRevisionNumber($address);
 }
+
 my $diffres = svnCmd("diff","-r $srev:$erev", $address, "");
 my $files = getDiffFileList($diffres);
 
@@ -55,8 +58,8 @@ if( 0 != @{$deleteFile} ){
 }
 
 
-if( exists $gOptions->{'-report'} ){
-	exportReport( "$outputPath\/$gOptions->{'-report'}", $fileList);
+if( exists $gOptions->{'report'} ){
+	exportReport( "$outputPath\/$gOptions->{'report'}", $fileList);
 }
 print "complate.\n";
 exit;
@@ -152,11 +155,11 @@ sub svnCmd
 sub getUserInfo
 {
 	my $res = '';
-	if( exists $gOptions->{'-u'} ){
-		$res = "--username $gOptions->{'-u'}";
+	if( exists $gOptions->{'u'} ){
+		$res = "--username $gOptions->{'u'}";
 	}
-	if( exists $gOptions->{'-p'} ){
-		$res = $res." --password  $gOptions->{'-p'}";
+	if( exists $gOptions->{'p'} ){
+		$res = $res." --password  $gOptions->{'p'}";
 	}
 	return $res;
 }
@@ -228,17 +231,20 @@ sub getOptions
 	for(my $i=0; $i< @{$argv}; $i++){
 		my $key = decode('cp932', $argv->[$i]);
 		if( $key =~ /^-(u|p|report)$/ ){
-			$options{$key} = decode('cp932', $argv->[$i+1]);
+			$options{$1} = decode('cp932', $argv->[$i+1]);
 			$i++;
 		}
 		elsif( $key eq '-r' ){
 			my $param = decode('cp932', $argv->[$i+1]);
 			if( $param !~ /^(%d):(%d)$/ ) {
-				die "illigal parameter with options ($param)";
+				die "illigal parameter with options ($key = $param)";
 			}
-			$options{'-r_start'} = $1;
-			$options{'-r_end'} = $2;
+			$options{'r_start'} = $1;
+			$options{'r_end'} = $2;
 			$i++;
+		}
+		elsif( $key =~ /^-/ ){
+			die "illigal parameter with options ($key)";
 		}
 		else{
 			push @newAragv, $key;
