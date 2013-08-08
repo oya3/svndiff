@@ -9,7 +9,7 @@ use Encode::JP;
 
 use Data::Dumper;
 
-print "svndiff ver. 0.13.08.06.\n";
+print "svndiff ver. 0.13.08.08.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
 my $args = @{$argv};
 
@@ -21,6 +21,7 @@ if( $args != 3 ){
 	print "          : -report (fileNmae) : output add/del/mod report.\n";
 	print "          : -d (path) : output delete path.\n";
 	print "          : -dbg : debug mode.\n";
+	print "https://github.com/oya3/svndiff\n";
     exit;
 }
 
@@ -100,6 +101,8 @@ sub exportReport
 {
 	my ($file,$fileList,$deletePath) = @_;
 
+	print "export report.[$file]\n";
+	
 	my $file_sjis = encode('cp932', $file);
 	my %keys = ("A"=>"追加", "D"=>"削除", "M"=>"変更", "R"=>"置換");
 	
@@ -137,6 +140,8 @@ sub svnExportFiles
 {
 	my ($rev, $svnrepo, $address, $files, $path, $deletePath) = @_;
 
+	print "exporting rev\.$rev\...\n";
+	
 	$path = $path."\/$rev";
 	my @notFoundFile = ();
 	foreach my $file ( keys %{$files} ){
@@ -241,6 +246,8 @@ sub getDiffFileList
 sub getRevisionNumber
 {
 	my ($address, $option) = @_;
+
+	print "checking repository... [$address]\n";
 	# --stop-on-copy を指定するとブランチができたポイントまでとなる
 	# --verbose を指定すると追加／削除／変更がファイル単位で分かる
 	my $resArray = svnCmd("log", $option, "\"$address\"", "");
