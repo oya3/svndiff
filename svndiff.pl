@@ -9,17 +9,17 @@ use Encode::JP;
 
 use Data::Dumper;
 
-print "svndiff ver. 0.13.08.08.\n";
+print "svndiff ver. 0.13.08.29.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
 my $args = @{$argv};
 
-if( $args != 3 ){
-	print "Usage: svndiff [options] <svn repo> <svn address> <output path>\n";
+if( $args != 2 ){
+	print "Usage: svndiff [options] <svn address> <output path>\n";
 	print "  options : -u : user.\n";
 	print "          : -p : password.\n";
 	print "          : -r (start:end) : revsion number.\n";
 	print "          : -report (fileNmae) : output add/del/mod report.\n";
-	print "          : -d (path) : output delete path.\n";
+	print "          : -shortpath : short output path.\n";
 	print "          : -dbg : debug mode.\n";
 	print "https://github.com/oya3/svndiff\n";
     exit;
@@ -34,9 +34,11 @@ if( !isInstallSVN() ){
 my $fileList = undef;
 my $srev = '';
 my $erev = '';
-my $svnrepo = $argv->[0];
-my $address = $argv->[1];
-my $outputPath  = $argv->[2];
+
+my $address = $argv->[0];
+my $outputPath  = $argv->[1];
+my $svnrepo = getRepositoryRoot($address);
+print "Repository Root: $svnrepo\n";
 
 # オプション指定でリビジョンが存在か確認
 if( exists $gOptions->{'r_start'} ){
@@ -48,27 +50,31 @@ else{
 	($srev, $erev, $fileList) = getRevisionNumber($address, "--stop-on-copy --verbose" );
 }
 
-#my $diffres = svnCmd("diff","-r $srev:$erev", "\"$address\"", "");
-#print encode('cp932', "diff ".join '', @{$diffres});
-#my $files = getDiffFileList($diffres);
+my $sErrorFile = svnExportFiles("$srev", $svnrepo, $address, $fileList, $outputPath); # 開始
+my $eErrorFile = svnExportFiles("$erev", $svnrepo, $address, $fileList, $outputPath); # 終了
 
-my $sErrorFile = svnExportFiles("$srev", $svnrepo, $address, $fileList, $outputPath, $gOptions->{'d'}); # 開始
-my $eErrorFile = svnExportFiles("$erev", $svnrepo, $address, $fileList, $outputPath, $gOptions->{'d'}); # 終了
-
-#if( 0 != @{$sErrorFile} ){
-#	print encode('cp932', "illigalFile file list\n");
-#	foreach my $file (@{$sErrorFile}){
-#		print encode('cp932', "\[$file\]\n");
-#	}
-#}
 if( exists $gOptions->{'report'} ){
 	exportReport( "$outputPath\/$gOptions->{'report'}", $fileList, $gOptions->{'d'});
 }
 
-putDeletedList($fileList);
+## export コマンドで@PEGREVを指定することで、削除済みファイルをエクスポートできることが
+## 判明したため削除リストを表示する必要はなくなった。
+# putDeletedList($fileList);
 
 print "complate.\n";
 exit;
+
+sub getRepositoryRoot
+{
+ 	my $address = shift;
+ 	my $res = svnCmd("info" , "", "$address", "");
+ 	my $string = join '', @{$res};
+	if( $string =~ /Repository Root: (.+?)$/m ){
+ 		return $1;
+ 	}
+ 	die "illigal svn info command. $res";
+ 	return 'error';
+}
 
 sub dbg_print
 {
@@ -78,6 +84,9 @@ sub dbg_print
 	}
 }
 
+# 削除済みファイルリストを出力
+# svn copy http://localhost/svn/repository/hoge.txt@10
+# このコマンドでファイル単位で削除済みファイルを復活させれるかもしれない。
 sub putDeletedList
 {
 	my ($fileList) = @_;
@@ -101,7 +110,7 @@ sub exportReport
 {
 	my ($file,$fileList,$deletePath) = @_;
 
-	print "export report.[$file]\n";
+	print encode('cp932', "export report.[$file]\n");
 	
 	my $file_sjis = encode('cp932', $file);
 	my %keys = ("A"=>"追加", "D"=>"削除", "M"=>"変更", "R"=>"置換");
@@ -130,7 +139,6 @@ sub _mkdir
 		if( $dir ){
 			$paths = $paths."$dir";
 			mkdir encode('cp932', "$paths");
-#			print encode('cp932', "--- paths---\n[$paths]\n");
 		}
 		$paths = $paths."\/";
 	}
@@ -138,9 +146,14 @@ sub _mkdir
 
 sub svnExportFiles
 {
-	my ($rev, $svnrepo, $address, $files, $path, $deletePath) = @_;
+	my ($rev, $svnrepo, $address, $files, $path) = @_;
+	print encode('cp932', "exporting rev\.$rev\...\n");
 
-	print "exporting rev\.$rev\...\n";
+	my $deletePath = undef;
+	if( exists $gOptions->{'shortpath'} ){ # 短縮出力パスが有効の場合
+		$deletePath = $address;
+		$deletePath =~ s/$svnrepo(.+)$/$1/;
+	}
 	
 	$path = $path."\/$rev";
 	my @notFoundFile = ();
@@ -148,9 +161,6 @@ sub svnExportFiles
 		if( $file !~ /\..+?$/ ){
 			next; # フォルダなんで無視（T.B.D）
 		}
-#		if( 'D' eq $files->{$file} ){
-#			next; # 削除ファイルは出力しない。
-#		}
 		# "linecount_test/branches/users/oya/linecount_test/..." , remove "/branches/users/oya/linecount_test" = "linecount_test/..."
 		my $outFilePath = "$path"."$file";
 		if( defined $deletePath ){
@@ -162,7 +172,14 @@ sub svnExportFiles
 		$dir =~ s/^(.+)[\\\/].+$/$1/;
 		_mkdir $dir;
 		
-		my $res = svnCmd("export", "-r $rev --force", "\"$svnrepo"."$file\"", "\"$outFilePath\"");
+		my $res = undef;
+		if( 'D' eq $files->{$file} ){
+			# svn copy http://localhost/svn/repository/hoge.txt@10 のように@マーク式にすると削除済みファイルも取得できる
+			$res = svnCmd("export", "--force", "\"$svnrepo"."$file\@$rev\"", "\"$outFilePath\"");
+		}
+		else{
+			$res = svnCmd("export", "-r $rev --force", "\"$svnrepo"."$file\"", "\"$outFilePath\"");
+		}
 #		my $res = svnCmd("cat", "-r $rev", "\"$svnrepo"."$file\"", "> \"$outFilePath\"");
 		my $resString = join '', @{$res};
 		dbg_print("exp :$resString");
@@ -300,7 +317,7 @@ sub getOptions
 	my @newAragv = ();
 	for(my $i=0; $i< @{$argv}; $i++){
 		my $key = decode('cp932', $argv->[$i]);
-		if( $key =~ /^-(u|p|report|d)$/ ){
+		if( $key =~ /^-(u|p|report)$/ ){
 			$options{$1} = decode('cp932', $argv->[$i+1]);
 			$i++;
 		}
@@ -313,7 +330,7 @@ sub getOptions
 			$options{'r_end'} = $2;
 			$i++;
 		}
-		elsif( $key =~ /^-(dbg)$/ ){
+		elsif( $key =~ /^-(dbg|shortpath)$/ ){
 			$options{$1} = 1;
 		}
 		elsif( $key =~ /^-/ ){
