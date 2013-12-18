@@ -8,6 +8,12 @@ use Encode;
 use Encode::JP;
 
 use Data::Dumper;
+{
+    package Data::Dumper;
+	no warnings 'redefine'; # 関数再定義警告を無効
+    sub qquote { return shift; }
+}
+$Data::Dumper::Useperl = 1;
 
 print "svndiff ver. 0.13.08.29.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
@@ -43,12 +49,14 @@ print "Repository Root: $svnrepo\n";
 # オプション指定でリビジョンが存在か確認
 if( exists $gOptions->{'r_start'} ){
 	# オプション指定がある
-	($srev, $erev, $fileList) = getRevisionNumber($address, "-r $gOptions->{'r_end'}:$gOptions->{'r_start'} --verbose" );
+	($srev, $erev, $fileList) = getRevisionNumber($svnrepo, $address, "-r $gOptions->{'r_end'}:$gOptions->{'r_start'} --verbose" );
 }
 else{
 	# ブランチの最初と最後のリビジョンを取得する
-	($srev, $erev, $fileList) = getRevisionNumber($address, "--stop-on-copy --verbose" );
+	($srev, $erev, $fileList) = getRevisionNumber($svnrepo, $address, "--stop-on-copy --verbose" );
 }
+
+#print "filelist.\n".encode('cp932', Dumper($fileList))."\n";
 
 my $sErrorFile = svnExportFiles("$srev", $svnrepo, $address, $fileList, $outputPath); # 開始
 my $eErrorFile = svnExportFiles("$erev", $svnrepo, $address, $fileList, $outputPath); # 終了
@@ -172,6 +180,7 @@ sub svnExportFiles
 		$dir =~ s/^(.+)[\\\/].+$/$1/;
 		_mkdir $dir;
 		
+		#print encode('cp932',"[$files->{$file}]001file[$file][$outFilePath]\n");
 		my $res = undef;
 		if( 'D' eq $files->{$file} ){
 			# svn copy http://localhost/svn/repository/hoge.txt@10 のように@マーク式にすると削除済みファイルも取得できる
@@ -196,6 +205,7 @@ sub execCmd
 	my ($cmd) = @_;
 	$cmd = encode('cp932', $cmd);
 	dbg_print("cmd : $cmd\n");
+#	$cmd = encode('cp932', $cmd);
 	open my $rs, "$cmd 2>&1 |";
 	my @rlist = <$rs>;
 	my @out = ();
@@ -262,9 +272,9 @@ sub getDiffFileList
 # ブランチの最初と最後のリビジョンを取得する
 sub getRevisionNumber
 {
-	my ($address, $option) = @_;
+	my ($svnrepo, $address, $option) = @_;
 
-	print "checking repository... [$address]\n";
+	print encode('cp932', "checking repository[$svnrepo]... [$address]\n");
 	# --stop-on-copy を指定するとブランチができたポイントまでとなる
 	# --verbose を指定すると追加／削除／変更がファイル単位で分かる
 	my $resArray = svnCmd("log", $option, "\"$address\"", "");
@@ -278,11 +288,18 @@ sub getRevisionNumber
 		}
 		
 		if( 1 <= @revs ){
-			if( $line =~ /^   ([MADR]{1}) (\/.+?)$/ ){
+#			print encode('cp932',"line:$line");
+			if( $line =~ /^   ([MADR]{1}) (\/.+)$/ ){
 				my $a1 = $1; my $a2 = $2;
-				if( $a2 =~ /\(from .+\)/ ){
-					next; # 意味不明フォルダなんでfilelistの対象としない
+#				print encode('cp932', "MADR:$a1:$a2\n");
+				if( $a2 =~ /(.+?) \(from .+\)/ ){
+					#next; # 意味不明フォルダなんでfilelistの対象としない
+					$a2 = $1; # ファイル名またはフォルダ名のみに丸め込む
 				}
+				if( isDirectory($svnrepo, $a2) ){
+					next; # フォルダは無視する
+				}
+				
 				# A 項目が追加されました。
 				# D 項目が削除されました。
 				# M 項目の属性やテキスト内容が変更されました。
@@ -294,9 +311,9 @@ sub getRevisionNumber
 					elsif( ($fileList{$a2} ne 'D') && ($a1 eq 'A') ){ # 最初が削除の場合は、上書きは追加しか認めない
 						$fileList{$a2} = 'M'; # 変更扱いとしておく
 					}
-				else{
-					$fileList{$a2} = $a1;
-				}
+					else{
+						$fileList{$a2} = $a1;
+					}
 				}
 				else{
 					$fileList{$a2} = $a1;
@@ -309,6 +326,19 @@ sub getRevisionNumber
 	}
 	return ($revs[0], $revs[$#revs], \%fileList);
 }
+
+sub isDirectory
+{
+	my($svnrepo, $a2) = @_;
+	
+	my $res = svnCmd("info", '', $svnrepo.$a2, '');
+ 	my $string = join '', @{$res};
+	if( $string =~ /Node Kind: directory/ ){ # 'Node Kind: file' by file.
+ 		return 1;
+ 	}
+ 	return 0;
+}
+
 
 sub getOptions
 {
