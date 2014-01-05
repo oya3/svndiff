@@ -15,7 +15,7 @@ use Data::Dumper;
 }
 $Data::Dumper::Useperl = 1;
 
-print "svndiff ver. 0.13.08.29.\n";
+print "svndiff ver. 0.13.12.27.\n";
 my ($argv, $gOptions) = getOptions(\@ARGV); # オプションを抜き出す
 my $args = @{$argv};
 
@@ -46,6 +46,8 @@ my $outputPath  = $argv->[1];
 my $svnrepo = getRepositoryRoot($address);
 print "Repository Root: $svnrepo\n";
 
+# $gOptions->{'dbg'} = "ON"; # debug print on
+
 # オプション指定でリビジョンが存在か確認
 if( exists $gOptions->{'r_start'} ){
 	# オプション指定がある
@@ -56,7 +58,7 @@ else{
 	($srev, $erev, $fileList) = getRevisionNumber($svnrepo, $address, "--stop-on-copy --verbose" );
 }
 
-#print "filelist.\n".encode('cp932', Dumper($fileList))."\n";
+#print "&&& filelist. &&&\n".encode('cp932', Dumper($fileList))."\n";
 
 my $sErrorFile = svnExportFiles("$srev", $svnrepo, $address, $fileList, $outputPath); # 開始
 my $eErrorFile = svnExportFiles("$erev", $svnrepo, $address, $fileList, $outputPath); # 終了
@@ -277,54 +279,95 @@ sub getRevisionNumber
 	print encode('cp932', "checking repository[$svnrepo]... [$address]\n");
 	# --stop-on-copy を指定するとブランチができたポイントまでとなる
 	# --verbose を指定すると追加／削除／変更がファイル単位で分かる
-	my $resArray = svnCmd("log", $option, "\"$address\"", "");
 	
-	my @revs = ();
-	my %fileList = ();
+	my %outParam = (); # key{revision, fileList} として一旦束ねる
+	%{$outParam{"fileList"}} = ();
+	@{$outParam{"revision"}} = ();
+	
+	getLog($svnrepo, $address, $option, \%outParam);
+	
+	my $fileList = $outParam{"fileList"};
+	my $revs = $outParam{"revision"};
+	
+	if( 0 == scalar(keys(%{$fileList})) ){
+		die "[$address] is no history.\n"; # history log がない
+	}
+	return ($revs->[0], $revs->[scalar(@{$revs})-1], $fileList);
+}
+
+# svn からログを取得する（再帰)
+sub getLog
+{
+	my ($svnrepo, $address, $option, $outParam, $from, $to) = @_;
+
+	if( defined $from ){
+		dbg_print("\n*** getLog [$svnrepo] [$address] [$option] [$from] [$to]\n");
+	}
+	else{
+		dbg_print("\n*** getLog [$svnrepo] [$address] [$option] [undef] [undef]\n");
+	}
+	
+	my $resArray = svnCmd("log", $option, "\"$address\"", "");
+
+	my $fileList = $outParam->{"fileList"};
+	my $revs = $outParam->{"revision"};
+	
 	while( my $line = pop(@{$resArray}) ){ # 過去からさかのぼる
 		dbg_print($line);
 		if( $line =~ /^r([0-9]+) |.+ lines$/ ){
-			push @revs, $1;
+			push @{$revs}, $1;
 		}
 		
-		if( 1 <= @revs ){
+		if( 1 <= @{$revs} ){
 #			print encode('cp932',"line:$line");
 			if( $line =~ /^   ([MADR]{1}) (\/.+)$/ ){
-				my $a1 = $1; my $a2 = $2;
-#				print encode('cp932', "MADR:$a1:$a2\n");
-				if( $a2 =~ /(.+?) \(from .+\)/ ){
-					#next; # 意味不明フォルダなんでfilelistの対象としない
-					$a2 = $1; # ファイル名またはフォルダ名のみに丸め込む
+				my $type = $1; my $file = $2;
+#				print encode('cp932', "MADR:$type:$file\n");
+				if( $file =~ /(.+?) \(from (.+?)\:([0-9]+?)\)/ ){ # マージされている場合
+					dbg_print("merge 1[$1] 2[$2] 3[$3]\n");
+					my $now_from = $1; my $now_to = $2; my $now_rev = $3;
+					if( defined $from ){ # 定義済みの場合、元のアドレスがあるので引き継ぐ
+						getLog($svnrepo, $svnrepo.$now_to, "--stop-on-copy --verbose -r $now_rev ", $outParam, $from, $now_to);
+					}
+					else{
+						getLog($svnrepo, $svnrepo.$now_to, "--stop-on-copy --verbose -r $now_rev ", $outParam, $now_from, $now_to);
+					}
+					next;
 				}
-				if( isDirectory($svnrepo, $a2) ){
+				if( isDirectory($svnrepo, $file) ){
 					next; # フォルダは無視する
 				}
 				
+				if( defined $from ){ # 定義済みの場合、元のアドレスがあるので置き換える
+					dbg_print("replace [$to] [$from] [$file]\n");
+					if( $file !~ /$to/ ){
+						next; # 対象外
+					}
+					$file =~ s/$to/$from/g;
+				}
+				
+				dbg_print("target[$file]\n");
 				# A 項目が追加されました。
 				# D 項目が削除されました。
 				# M 項目の属性やテキスト内容が変更されました。
 				# R 項目が同じ場所の違うもので置き換えられました。
-				if( exists $fileList{$a2} ){
-					if( ($fileList{$a2} ne 'A') && ($a1 eq 'D') ){ # 最初が追加の場合は、上書きは削除しか認めない
-						delete($fileList{$a2}); # 最初から無かったことにする
+				if( exists $fileList->{$file} ){
+					if( ($fileList->{$file} ne 'A') && ($type eq 'D') ){ # 最初が追加の場合は、上書きは削除しか認めない
+						delete($fileList->{$file}); # 最初から無かったことにする
 					}
-					elsif( ($fileList{$a2} ne 'D') && ($a1 eq 'A') ){ # 最初が削除の場合は、上書きは追加しか認めない
-						$fileList{$a2} = 'M'; # 変更扱いとしておく
+					elsif( ($fileList->{$file} ne 'D') && ($type eq 'A') ){ # 最初が削除の場合は、上書きは追加しか認めない
+						$fileList->{$file} = 'M'; # 変更扱いとしておく
 					}
 					else{
-						$fileList{$a2} = $a1;
+						$fileList->{$file} = $type;
 					}
 				}
 				else{
-					$fileList{$a2} = $a1;
+					$fileList->{$file} = $type;
 				}
 			}
 		}
 	}
-	if( 1 >= @revs ){
-		die "[$address] is no history.\n";
-	}
-	return ($revs[0], $revs[$#revs], \%fileList);
 }
 
 sub isDirectory
